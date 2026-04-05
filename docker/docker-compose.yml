@@ -1,0 +1,131 @@
+# LOTT Docker Compose 配置
+# 用于启动完整的服务栈
+
+version: '3.8'
+
+services:
+  # TimescaleDB 时序数据库
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: lott-timescaledb
+    environment:
+      POSTGRES_USER: lott_user
+      POSTGRES_PASSWORD: lott_password
+      POSTGRES_DB: lott
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lott_user -d lott"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - lott-network
+
+  # Redis 缓存和消息队列
+  redis:
+    image: redis:7-alpine
+    container_name: lott-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - lott-network
+
+  # Redis Commander (Redis 可视化管理)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: lott-redis-ui
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - lott-network
+
+  # pgAdmin (PostgreSQL 可视化管理)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: lott-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@lott.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    depends_on:
+      - timescaledb
+    restart: unless-stopped
+    networks:
+      - lott-network
+
+  # LOTT 策略容器示例
+  lott-strategy:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: lott-strategy
+    environment:
+      - LOTT_DB_HOST=timescaledb
+      - LOTT_DB_PORT=5432
+      - LOTT_DB_USER=lott_user
+      - LOTT_DB_PASSWORD=lott_password
+      - LOTT_DB_NAME=lott
+      - LOTT_REDIS_HOST=redis
+      - LOTT_REDIS_PORT=6379
+    volumes:
+      - ../src:/app/src:ro
+      - ../config:/app/config:ro
+      - strategy_data:/app/data
+      - strategy_logs:/app/logs
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - lott-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  timescaledb_data:
+    driver: local
+  redis_data:
+    driver: local
+  strategy_data:
+    driver: local
+  strategy_logs:
+    driver: local
+
+networks:
+  lott-network:
+    driver: bridge
+
+# 使用说明:
+# 启动所有服务: docker-compose up -d
+# 查看日志: docker-compose logs -f
+# 停止服务: docker-compose down
+# 停止并删除数据: docker-compose down -v
