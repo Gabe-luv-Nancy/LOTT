@@ -1,0 +1,41 @@
+# Data files - too large to commit
+*.csv
+*.parquet
+*.feather
+*.pkl
+*.pickle
+
+# Logs
+*.log
+logs/
+
+# SQLite databases
+*.sqlite
+*.db
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large data directories
+DL/akshare_daily/
+DL/minute_history/
+DL/shfe/
+DL/JQData/
+DL/merged/
+data/
+results/
+
+# Keep these directories but not their contents
+# DL/
+# data/
+# results/
