@@ -194,3 +194,16 @@ class TestFullIntegration(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+# ---------------------------------------------------------------------------
+# 任务要求补充：仅测试 import，不运行 GUI
+# ---------------------------------------------------------------------------
+
+def test_import_all_panels():
+    """三大 Panel 导入测试"""
+    import sys
+    sys.path.insert(0, '/mnt/x/LOTT/src/')
+    from Frontend.panels.database.database_panel import DatabasePanel
+    from Frontend.panels.variables.variable_panel import VariablePanel
+    from Frontend.panels.backtest.backtest_panel import BacktestPanel
+    assert all([DatabasePanel, VariablePanel, BacktestPanel])

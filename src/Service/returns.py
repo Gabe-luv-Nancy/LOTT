@@ -1,5 +1,6 @@
 import sys
 sys.path.append('X:/LOTT/src/Cross_Layer')
+from typing import List, Dict, Any, Optional
 from global_imports import *
 
 class Returns:
@@ -15,6 +16,8 @@ class Returns:
         初始化收益率计算器
         """
         self.df = df
+        self._return_type: str = 'simple'
+        self._period: int = 1
     def _report(self):
         """
         生成数据质量报告
@@ -256,6 +259,186 @@ class Returns:
             cumulative_df[f'{col.replace("_return", "")}_cumulative'] = cumulative_returns
         
         return cumulative_df
+
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        导出收益率计算结果为字典（用于 JSON 序列化）
+
+        Returns:
+            Dict[str, Any]: 包含 return_type, period, data, annualized_return,
+                            annualized_volatility, sharpe_ratio, max_drawdown, calmar_ratio
+        """
+        return {
+            "return_type": self._return_type,
+            "period": self._period,
+            "data": self.df.to_dict(),
+            "annualized_return": getattr(self, 'annualized_return', 0.0),
+            "annualized_volatility": getattr(self, 'annualized_volatility', 0.0),
+            "sharpe_ratio": getattr(self, 'sharpe_ratio', 0.0),
+            "max_drawdown": getattr(self, 'max_drawdown', 0.0),
+            "calmar_ratio": getattr(self, 'calmar_ratio', 0.0),
+        }
+
+    def annualized_metrics(self, risk_free_rate: float = 0.0) -> Dict[str, float]:
+        """
+        计算年化指标（基于累计收益率序列）
+
+        计算逻辑：
+        1. annual_return  = 从 cumulative_returns 推算总收益，再按时间年化
+        2. annual_vol     = 日收益波动率 * sqrt(252)
+        3. sharpe_ratio   = (annual_return - risk_free_rate) / annual_vol
+        4. sortino_ratio  = (annual_return - risk_free_rate) / 下行波动率
+        5. max_drawdown   = 累计收益率序列的最大回撤比例
+        6. max_drawdown_duration = 最大回撤的持续天数
+
+        Args:
+            risk_free_rate: 年化无风险利率（默认 0.0）
+
+        Returns:
+            Dict[str, float]: {
+                sharpe_ratio, sortino_ratio, calmar_ratio,
+                max_drawdown, max_drawdown_duration
+            }
+        """
+        import numpy as np
+
+        # 取第一列的累计收益率
+        cum_col = [c for c in self.df.columns if 'cumulative' in c or 'return' in c]
+        if not cum_col:
+            return {"sharpe_ratio": 0.0, "sortino_ratio": 0.0,
+                    "calmar_ratio": 0.0, "max_drawdown": 0.0,
+                    "max_drawdown_duration": 0}
+
+        series = self.df[cum_col[0]].dropna()
+        if len(series) < 2:
+            return {"sharpe_ratio": 0.0, "sortino_ratio": 0.0,
+                    "calmar_ratio": 0.0, "max_drawdown": 0.0,
+                    "max_drawdown_duration": 0}
+
+        # ---- 年化收益 ----
+        total_return = (series.iloc[-1] / series.iloc[0]) - 1 if series.iloc[0] != 0 else 0.0
+        n_days = len(series)
+        n_years = n_days / 252
+        annual_return = (1 + total_return) ** (1 / n_years) - 1 if n_years > 0 else 0.0
+
+        # ---- 年化波动率 ----
+        daily_returns = series.pct_change().dropna()
+        daily_vol = daily_returns.std()
+        annual_vol = daily_vol * np.sqrt(252) if daily_vol != 0 else 0.0
+
+        # ---- 夏普比率 ----
+        if annual_vol != 0:
+            sharpe = (annual_return - risk_free_rate) / annual_vol
+        else:
+            sharpe = 0.0
+
+        # ---- 索提诺比率（只算下行波动）----
+        downside_returns = daily_returns[daily_returns < 0]
+        downside_vol = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0.0
+        sortino = (annual_return - risk_free_rate) / downside_vol if downside_vol != 0 else 0.0
+
+        # ---- 最大回撤及持续天数 ----
+        running_max = series.cummax()
+        drawdown = (series - running_max) / running_max
+        max_dd = drawdown.min()  # 最大回撤（负值）
+
+        # 最大回撤持续天数：找到回撤从0到最大回撤再回到0的区间长度
+        is_dd = drawdown < 0
+        dd_starts = is_dd & ~is_dd.shift(1).fillna(False)
+        dd_ends = (~is_dd) & is_dd.shift(1).fillna(False)
+        if is_dd.iloc[-1]:
+            dd_ends.iloc[-1] = True
+        start_idx = series.index[0]
+        max_dd_duration = 0
+        in_dd = False
+        dd_start = None
+        for dt, flag in dd_starts.items():
+            if flag:
+                in_dd = True
+                dd_start = dt
+        for dt, flag in dd_ends.items():
+            if flag and in_dd and dd_start is not None:
+                duration = (dt - dd_start).days
+                if duration > max_dd_duration:
+                    max_dd_duration = duration
+                in_dd = False
+
+        # ---- 卡玛比率 ----
+        calmar = annual_return / abs(max_dd) if max_dd != 0 else 0.0
+
+        return {
+            "sharpe_ratio": float(sharpe),
+            "sortino_ratio": float(sortino),
+            "calmar_ratio": float(calmar),
+            "max_drawdown": float(max_dd),
+            "max_drawdown_duration": int(max_dd_duration),
+        }
+
+    def holding_period_analysis(self, trades: List[Dict]) -> Dict[str, Any]:
+        """
+        分析持仓周期
+
+        Args:
+            trades: 交易列表，每条包含 entry_date, exit_date, pnl
+
+        Returns:
+            Dict[str, Any]: {
+                avg_holding_days, max_holding_days, min_holding_days,
+                distribution: {bucket: count}  # 持仓天数分布桶
+            }
+        """
+        if not trades:
+            return {
+                "avg_holding_days": 0.0,
+                "max_holding_days": 0,
+                "min_holding_days": 0,
+                "distribution": {}
+            }
+
+        holding_days = []
+        for t in trades:
+            entry = pd.to_datetime(t.get('entry_date'))
+            exit_d = pd.to_datetime(t.get('exit_date'))
+            if entry is not None and exit_d is not None and exit_d >= entry:
+                holding_days.append((exit_d - entry).days)
+
+        if not holding_days:
+            return {
+                "avg_holding_days": 0.0,
+                "max_holding_days": 0,
+                "min_holding_days": 0,
+                "distribution": {}
+            }
+
+        import numpy as np
+        avg_days = float(np.mean(holding_days))
+        max_days = int(max(holding_days))
+        min_days = int(min(holding_days))
+
+        # 分布桶：[0-5], [5-10], [10-20], [20-60], [60+]
+        buckets = {"0-5": 0, "5-10": 0, "10-20": 0, "20-60": 0, "60+": 0}
+        for d in holding_days:
+            if d <= 5:
+                buckets["0-5"] += 1
+            elif d <= 10:
+                buckets["5-10"] += 1
+            elif d <= 20:
+                buckets["10-20"] += 1
+            elif d <= 60:
+                buckets["20-60"] += 1
+            else:
+                buckets["60+"] += 1
+
+        return {
+            "avg_holding_days": avg_days,
+            "max_holding_days": max_days,
+            "min_holding_days": min_days,
+            "distribution": buckets
+        }
+
+
+
 
 def filter_trading_days(df: pd.DataFrame, 
                       country: str = 'CN', 

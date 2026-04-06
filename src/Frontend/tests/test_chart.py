@@ -185,3 +185,30 @@ class TestBandConfig(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+# ---------------------------------------------------------------------------
+# 任务要求补充：仅测试 import，不运行 GUI
+# ---------------------------------------------------------------------------
+
+def test_candle_item_import():
+    """CandleItem 导入测试"""
+    import sys, os
+    sys.path.insert(0, '/mnt/x/LOTT/src/')
+    from Frontend.chart.items.candle_item import CandleItem
+    assert CandleItem is not None
+
+
+def test_line_item_import():
+    """LineItem 导入测试"""
+    import sys, os
+    sys.path.insert(0, '/mnt/x/LOTT/src/')
+    from Frontend.chart.items.line_item import LineItem
+    assert LineItem is not None
+
+
+def test_marker_manager_import():
+    """MarkerManager 导入测试"""
+    import sys, os
+    sys.path.insert(0, '/mnt/x/LOTT/src/')
+    from Frontend.chart.markers.marker_manager import MarkerManager
+    assert MarkerManager is not None

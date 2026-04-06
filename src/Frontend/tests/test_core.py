@@ -177,3 +177,22 @@ class TestFrontendConfig(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+# ---------------------------------------------------------------------------
+# 任务要求补充：仅测试 import，不运行 GUI
+# ---------------------------------------------------------------------------
+
+def test_signal_bus_import():
+    """SignalBus 导入测试"""
+    import sys
+    sys.path.insert(0, '/mnt/x/LOTT/src/')
+    from Frontend.core.signal_bus import SignalBus
+    assert SignalBus is not None
+
+
+def test_data_proxy_import():
+    """DataProxy 导入测试"""
+    import sys
+    sys.path.insert(0, '/mnt/x/LOTT/src/')
+    from Frontend.core.data_proxy import DataProxy
+    assert DataProxy is not None
