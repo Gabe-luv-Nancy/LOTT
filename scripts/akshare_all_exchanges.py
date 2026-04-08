@@ -17,6 +17,7 @@
 import sys
 sys.path.insert(0, '/root/clabin_sync/LOTT/scripts')
 
+import pandas as pd
 import akshare as ak
 from pathlib import Path
 import time
@@ -271,17 +272,23 @@ def download_warehouse_receipts():
     下载仓单数据
 
     接口现状（2026-04-08 实测）：
-    - CZCE:  ✅ 可用，最早 2025-11-03
-    - GFEX:  ✅ 可用，最早 2024-01-22
-    - SHFE:  ❌ URL已404（网站改版，{date}dailystock.dat 不存在）
-    - DCE:   ❌ HTTP 412 WAF封锁（交易所对服务器IP拒绝）
+    - SHFE:  ✅ get_receipt (get_shfe_receipt_3) — 旧接口URL已404，用get_receipt新接口
+    - CZCE:  ✅ futures_warehouse_receipt_czce — Excel文件，详细仓库级
+    - GFEX:  ✅ futures_gfex_warehouse_receipt — API，详细仓库级
+    - DCE:   ❌ HTTP 412 WAF封锁（需 Tushare Pro 或浏览器方案）
     - CFFEX: N/A（金融期货无实物仓单）
+
+    输出：
+    - warehouse_receipts/CZCE/  — CZCE详细（每仓库一行）
+    - warehouse_receipts/GFEX/  — GFEX详细（每仓库一行）
+    - warehouse_receipts_agg/SHFE/ — SHFE汇总（每品种一行，来自get_receipt）
     """
-    print(f"\n[仓单] CZCE + GFEX ({TODAY_STR})...")
+    print(f"\n[仓单] CZCE + GFEX + SHFE ({TODAY_STR})...")
 
     total = 0
+    shfe_total = 0
 
-    # CZCE 仓单
+    # CZCE 仓单（详细，每仓库一行）
     try:
         data = ak.futures_warehouse_receipt_czce(date=TODAY_STR)
         if isinstance(data, dict):
@@ -293,11 +300,11 @@ def download_warehouse_receipts():
                     df.insert(0, "date", TODAY.strftime("%Y-%m-%d"))
                     df.to_csv(czce_dir / f"{variety}.csv", index=False)
                     total += 1
-            print(f"  CZCE: {len(data)} 品种 ✅")
+            print(f"  CZCE: {len(data)} 品种 ✅（详细仓库级）")
     except Exception as e:
         print(f"  CZCE ❌ {type(e).__name__}: {e}")
 
-    # GFEX 仓单
+    # GFEX 仓单（详细，每仓库一行）
     try:
         data = ak.futures_gfex_warehouse_receipt(date=TODAY_STR)
         if isinstance(data, dict):
@@ -309,18 +316,48 @@ def download_warehouse_receipts():
                     df.insert(0, "date", TODAY.strftime("%Y-%m-%d"))
                     df.to_csv(gfex_dir / f"{variety}.csv", index=False)
                     total += 1
-            print(f"  GFEX: {len(data)} 品种 ✅")
+            print(f"  GFEX: {len(data)} 品种 ✅（详细仓库级）")
     except Exception as e:
         print(f"  GFEX ❌ {type(e).__name__}: {e}")
 
-    # SHFE 仓单：URL已404，标记为不可用
-    print(f"  SHFE: ❌ URL已404（网站改版，SHFE改版后旧接口失效）")
+    # SHFE 仓单：使用 get_receipt（老接口已404，改用新URL）
+    SHFE_AGG_DIR = DATA / "warehouse_receipts_agg" / "SHFE"
+    SHFE_AGG_DIR.mkdir(parents=True, exist_ok=True)
+    SHFE_VARS = ['CU','AL','ZN','PB','NI','SN','AU','AG','RB','WR','HC','FU','BU','RU','SP','SS','LU','BC']
+    try:
+        df = ak.get_receipt(start_date=TODAY_STR, end_date=TODAY_STR, vars_list=SHFE_VARS)
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                variety = str(row.get('var', '')).strip()
+                if not variety:
+                    continue
+                filepath = SHFE_AGG_DIR / f"{variety}.csv"
+                new_row = pd.DataFrame([{
+                    'date': TODAY.strftime("%Y-%m-%d"),
+                    'var': variety,
+                    'receipt': row.get('receipt', 0),
+                    'receipt_chg': row.get('receipt_chg', 0),
+                }])
+                if filepath.exists():
+                    existing = pd.read_csv(filepath)
+                    if TODAY.strftime("%Y-%m-%d") in existing['date'].astype(str).values:
+                        continue
+                    combined = pd.concat([existing, new_row], ignore_index=True)
+                else:
+                    combined = new_row
+                combined.to_csv(filepath, index=False)
+                shfe_total += 1
+            print(f"  SHFE: {shfe_total} 品种 ✅（汇总级，get_receipt）")
+        else:
+            print(f"  SHFE: ⚠️ 无数据")
+    except Exception as e:
+        print(f"  SHFE ❌ {type(e).__name__}: {str(e)[:60]}")
 
     # DCE 仓单：WAF封锁
-    print(f"  DCE:  ❌ HTTP 412（交易所WAF封锁服务器IP）")
+    print(f"  DCE:  ❌ HTTP 412 WAF封锁（需 Tushare Pro）")
 
-    print(f"  ✅ 共保存 {total} 个品种仓单")
-    return total
+    print(f"  ✅ 共保存 {total + shfe_total} 个品种仓单（含SHFE汇总 {shfe_total} 个）")
+    return total + shfe_total
 
 
 # ===== 主程序 =====
