@@ -83,40 +83,15 @@
 
 ### 3.1 我这边无法获取的数据
 
-| 数据源 | 问题 | 本地可尝试方案 |
-|--------|------|---------------|
-| **DCE 仓单** | HTTP 412 WAF 封锁 | 浏览器访问 `http://www.dce.com.cn` 或 Tushare Pro |
-| **DCE 日度（交易所级）** | 接口全天 JSONDecodeError | sina 单合约已可用，交易所级暂无方案 |
-| **99qh 库存** | HTTP 412 WAF 封锁 | 浏览器访问 `https://www.99qh.com` |
+| 数据源 | 问题 | 本地 akshare 方案 |
+|--------|------|-----------------|
+| **DCE 仓单** | HTTP 412 WAF 封锁 | 暂无，依赖东方财富库存替代 |
+| **DCE 日度（交易所级）** | 接口全天 JSONDecodeError | `futures_zh_daily_sina()` 单合约替代，每日更新 |
+| **99qh 库存** | HTTP 412 WAF 封锁 | 暂无，依赖东方财富库存替代 |
 
-### 3.2 本地采集脚本参考
+### 3.2 两端协同方式
 
-如果本地 OpenClaw 也要参与采集，可参考：
-
-```bash
-# DCE 仓单（需本地浏览器环境）
-# 目标 URL：http://www.dce.com.cn/dcereport/publicweb/dailystat/wbillWeeklyQuotes
-# 浏览器抓包获取 JS 渲染后的数据
-
-# 99qh 库存（本地浏览器可访问）
-# 目标 URL：https://www.99qh.com/data/stockIn?productId=61
-
-# Tushare Pro（推荐，付费但数据全）
-pip install tushare
-# 设置 TUSHARE_TOKEN 环境变量
-# tushare pro 接口覆盖：日线/分钟/仓单/财务等全量数据
-```
-
-### 3.3 建议本地 OpenClaw 补充的数据
-
-```bash
-# 东方财富库存数据（已由云端采集，如需本地备份）
-python3 receipt_collector.py --inventory-only
-
-# 历史仓单回补（云端只有近期窗口）
-# 用 --start/--end 拉取历史范围
-python3 receipt_collector.py --start 20250101 --end 20260407
-```
+本地部署同款 OpenClaw 后，参照上述定时任务配置。数据通过 Syncthing 双向同步至同一目录，云端优先写入仓单和东方财富库存数据。
 
 ---
 
@@ -141,7 +116,6 @@ python3 receipt_collector.py --start 20250101 --end 20260407
 ```
 
 > **注意**：Syncthing 同步时以最后修改时间为准，避免两端同时写入同一文件。
-> 建议本地只读，云端独占写入；本地如有补充数据，写入 `local/` 子目录待合并。
 
 ---
 
